@@ -1,0 +1,54 @@
+---
+title: "Text Prediction App"
+output: ioslides_presentation
+author: Doris Chen
+date: "2023-03-23"
+---  
+
+## Introduction
+
+<font size="3">This is the Johns Hopkins-SwiftKey Capstone Project from Coursera Data Science Specialization.   
+  
+During the project, we built an App to predict the next words which the user is likely to enter according to what they have already entered.   
+  
+The App supports English only so far, Because we only use the English text file to train the model.    
+  
+
+  
+Try the [Text Prediction App]( https://pvxjz6-chen-doris.shinyapps.io/text-prediction-app/) now.  
+  
+The reproducible documents are in this [Github repo](https://github.com/Doris-QZ/Text_Prediction_App).</font>  
+
+## Stupid Backoff Algorithm
+
+<font size="3">The algorithm in the model is called "Stupid Backoff". The basic idea is that:
+
+* The model first searches the highest-order n-gram, which is 4-gram in our model, to find the matched words;  
+* If the higher-order n-gram has no match, it then back off to the (n-1)-gram, until the 2-gram table;
+* The score^1^ of the last word (predicted word) is discounted by 0.4 every time when it backs off to a lower-order n-gram;
+* The top 5 unigram will be recommended if there is not enough matching words from all higher-order n-grams;
+* In the end, the model returns the top 5 predicted words ranking by their scores.
+
+^1^ score = (count of the last word) / (count of the first words)</font>
+
+
+## Accuracy of the App
+
+<font size="3">Overall top-3 score:     18.35 %  
+Overall top-1 precision: 13.78 %  
+Overall top-3 precision: 22.29 %  
+Average runtime:         249.33 msec  
+Number of predictions:   28464  
+Total memory used:       191.47 MB  
+
+
+*After testing several models with different size of data through the benchmark function. This is the result of the model we picked. It seems the accuracy is in a reasonable range, but the runtime is still too slow. A further improvement is needed. </font> 
+
+*** 
+  
+<div class="centered">    
+Thank You!
+</div>  
+  
+
+

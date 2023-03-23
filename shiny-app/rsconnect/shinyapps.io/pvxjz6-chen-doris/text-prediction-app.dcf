@@ -1,0 +1,13 @@
+name: text-prediction-app
+title: text-prediction-app
+username:
+account: pvxjz6-chen-doris
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 8647164
+bundleId: 7000013
+url: https://pvxjz6-chen-doris.shinyapps.io/text-prediction-app/
+when: 1679608734.95567
+lastSyncTime: 1679608734.95569
+asMultiple: FALSE
+asStatic: FALSE

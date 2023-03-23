@@ -1,0 +1,343 @@
+# Text Prediction App: Milestone Report   
+
+Data Science Specialization Capstone Project 
+  
+Doris Chen  
+March 9, 2023
+  
+  
+### Synopsis  
+
+The goal of this assignment is to demonstrate our initial finding and understanding of the data set -- English text files collected from news, blogs and twitter. After exploring the data, we will summarize our plan for building the prediction algorithm and shiny app.  
+  
+  
+### A glance of the data set
+
+```{r echo = FALSE, message=FALSE}
+library(quanteda)
+library(quanteda.textstats)
+library(quanteda.textplots)
+library(tokenizers)
+library(tm)
+library(readtext)
+library(ngram)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+```
+
+```{r echo = FALSE, message=FALSE}
+conb <- file("final/en_US/en_US.blogs.txt", "r")
+blog <- readLines(conb, encoding="UTF-8", skipNul=TRUE)
+close(conb)
+
+cont <- file("final/en_US/en_US.twitter.txt", "r")
+twi <- readLines(cont, encoding="UTF-8", skipNul=TRUE)
+close(cont)
+
+conn <- file("final/en_US/en_US.news.txt", "r")
+news <- readLines(conn, encoding="UTF-8", skipNul=TRUE)
+close(conn)
+```
+
+```{r echo = FALSE, comment=""}
+# File names
+names <- c("en_US.blogs.txt", "en_US.twitter.txt","en_US.news.txt")
+
+# Count lines
+lines <- c(length(blog), length(twi), length(news))
+
+# Count words
+wordB <- wordcount(blog, sep=" ", count_fun=sum)
+wordT <- wordcount(twi, sep=" ", count_fun=sum)
+wordN <- wordcount(news, sep=" ", count_fun=sum)
+
+# File size
+sizeB <- round(file.info("final/en_US/en_US.blogs.txt")$size/1024^2,0)
+sizeT <- round(file.info("final/en_US/en_US.twitter.txt")$size/1024^2,0)
+sizeN <- round(file.info("final/en_US/en_US.news.txt")$size/1024/1024,0)
+
+data.frame(File=names, Lines=lines, Words=c(wordB, wordT, wordN), Size_M=c(sizeB, sizeT, sizeN))
+```
+
+The size of the text files are 200M, 159M and 196M, with 89.9k, 236k, 101k lines respectively. In this project, we sample 1% of the data from each file then turn them into a corpus object for further exploratory analysis. (Codes are in Appendix)
+
+```{r echo=FALSE, comment=""}
+set.seed(123)
+samB <- sample(blog, length(blog)*0.01)
+samT <- sample(twi, length(twi)*0.01)
+samN <- sample(news, length(news)*0.01)
+
+# Save sample
+writeLines(samB,"sample/blog_sample.txt" )
+writeLines(samT,"sample/twi_sample.txt" )
+writeLines(samN,"sample/news_sample.txt" )
+
+# Load in data and turn into a corpus 
+enSample <- readtext("sample/*.txt")
+enCorpus <- corpus(enSample)
+
+# Add file type to the corpus
+enCorpus$File <- str_sub(names(enCorpus), end=-12)
+summary(enCorpus)
+
+# Remove blog, twi, news, samB, samT, samN, enSample to save memories.
+remove("blog", "twi", "news", "samB","samT", "samN", "enSample")
+```
+
+### Tokenization and Data Cleaning   
+  
+We perform tokenization to break the texts into individual words and punctuation. Meanwhile we clean the data by removing punctuation, symbols, URL, white space, numbers and profanity (we use the profanity list from this [link](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/blob/master/en)), also converting all text to lower case.   
+  
+Since our ultimate goal is to create a text prediction App, we don't remove stop words, not performing word stemming either.   
+
+```{r echo=FALSE}
+enTok1 <- tokenize_words(enCorpus, strip_punct=FALSE) %>% 
+        tokens(remove_symbols=TRUE, remove_url=TRUE, remove_numbers=TRUE, remove_punct=TRUE, padding=TRUE)
+profanity <- readLines("en_profanity.txt", skipNul=TRUE)
+enTok1 <- tokens_select(enTok1, profanity, selection="remove", padding=TRUE)
+enDfm1 <- dfm(enTok1)
+```
+
+### Visualize the Most Frequent Words  
+  
+This is the word cloud for the sample data from blogs, news and twitter.  
+
+```{r echo=FALSE}
+textplot_wordcloud(enDfm1, min_size=1, max_size=6, max_words = 200)
+```
+  
+As we can see, the most frequent words are from a typical stopword list, like "the", "to", "of"... but these might be very useful in a text prediction App. 
+  
+We compare the top 25 most frequent words from the three text files to see if there are huge difference between different types of text. 
+
+```{r echo=FALSE}
+freq1 <- textstat_frequency(enDfm1, groups=enCorpus$File, n=25)
+
+b1 <- freq1 %>% 
+        filter(group=="blog") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+                geom_bar(stat="identity", fill="salmon")+
+                labs(title="Top25 Words in Blog", x="Words", y="Frequency")+
+                coord_flip()+
+                theme_classic()
+
+n1 <- freq1 %>% 
+        filter(group=="news") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgreen")+
+        labs(title="In News", x="Words", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+
+t1 <- freq1 %>% 
+        filter(group=="twi") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="yellow")+
+        labs(title="In Twitter", x="Words", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+
+ggarrange(b1, n1, t1, nrow=1)
+        
+
+```
+  
+    
+As can be seen from the plot above, the most frequency words from three text file are very similar with each other, over 70% of them are the same.  
+  
+### Exploring N-gram    
+  
+After checking the most frequent unigram, now we move on to explore 2-grams, 3-grams, 4-grams, which will be essential for the text prediction App.  
+  
+We plot the top 25 most frequent used N-grams from the sample text.
+  
+```{r echo=FALSE}
+enTok2 <- tokens_ngrams(enTok1, n=2)
+enDfm2 <- dfm(enTok2)
+freq2 <- textstat_frequency(enDfm2, n=25)
+ggplot(data=freq2, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Top25 Bigrams", subtitle="Samples from blogs, news and twitter", x="2-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+```
+  
+```{r echo=FALSE}
+enTok3 <- tokens_ngrams(enTok1, n=3)
+enDfm3 <- dfm(enTok3)
+freq3 <- textstat_frequency(enDfm3, n=25)
+ggplot(data=freq3, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Top25 Trigrams", subtitle="Samples from blogs, news and twitter", x="3-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+```  
+
+```{r echo=FALSE}
+enTok4 <- tokens_ngrams(enTok1, n=4)
+enDfm4 <- dfm(enTok4)
+freq4 <- textstat_frequency(enDfm4, n=25)
+ggplot(data=freq4, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Top25 Quadrigrams", subtitle="Samples from blogs, news and twitter", x="4-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+```  
+  
+### Conclusion and Further Plans  
+ 
+The most frequent N-grams plots show the association between words, this is very useful information for building the text prediction App, since the prediction / suggestion from the App about what users may type next is based on what they have already typed. Our next plan will be:  
+  
+  1. Research on different prediction models 
+  2. Build the prediction model
+  3. Test the accuracy and efficiency of the model
+  4. Design and build the Shiny App
+  5. Test the Shiny App
+  
+The challenge would be how to handle the unseen n-grams and how to balance the accuracy and efficiency of the model.  
+  
+
+### Appendix
+
+```{r eval=FALSE}
+# Loading the packages
+library(quanteda)
+library(quanteda.textstats)
+library(quanteda.textplots)
+library(tokenizers)
+library(tm)
+library(ngram)
+library(stringr)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)  
+  
+# Read in the data  
+conb <- file("final/en_US/en_US.blogs.txt", "r")
+blog <- readLines(conb, encoding="UTF-8", skipNul=TRUE)
+close(conb)
+
+cont <- file("final/en_US/en_US.twitter.txt", "r")
+twi <- readLines(cont, encoding="UTF-8", skipNul=TRUE)
+close(cont)
+
+conn <- file("final/en_US/en_US.news.txt", "r")
+news <- readLines(conn, encoding="UTF-8", skipNul=TRUE)
+close(conn)
+
+# File names
+names <- c("en_US.blogs.txt", "en_US.twitter.txt","en_US.news.txt")
+
+# Count lines
+lines <- c(length(blog), length(twi), length(news))
+
+# Count words
+wordB <- wordcount(blog, sep=" ", count_fun=sum)
+wordT <- wordcount(twi, sep=" ", count_fun=sum)
+wordN <- wordcount(news, sep=" ", count_fun=sum)
+
+# File size
+sizeB <- round(file.info("final/en_US/en_US.blogs.txt")$size/1024^2,0)
+sizeT <- round(file.info("final/en_US/en_US.twitter.txt")$size/1024^2,0)
+sizeN <- round(file.info("final/en_US/en_US.news.txt")$size/1024/1024,0)
+
+# Create a data frame of the file information
+data.frame(File=names, Lines=lines, Words=words, Size(m)=size)  
+   
+# Sampling 
+set.seed(123)
+samB <- sample(blog, length(blog)*0.01)
+samT <- sample(twi, length(twi)*0.01)
+samN <- sample(news, length(news)*0.01)
+
+# Save sample
+writeLines(samB,"sample/blog_sample.txt" )
+writeLines(samT,"sample/twi_sample.txt" )
+writeLines(samN,"sample/news_sample.txt" )
+
+# Load in data and turn into a corpus 
+enSample <- readtext("sample/*.txt")
+enCorpus <- corpus(enSample)
+
+# Add file type to the corpus
+enCorpus$File <- str_sub(names(enCorpus), end=-12)
+summary(enCorpus)
+
+# Remove blog, twi, news, samB, samT, samN, enSample to save memories.
+remove("blog", "twi", "news", "samB","samT", "samN", "enSample")  
+
+# Tokenization and Data cleaning 
+enTok1 <- tokenize_words(enCorpus, strip_punct=FALSE) %>% 
+        tokens(remove_symbols=TRUE, remove_url=TRUE, remove_numbers=TRUE, remove_punct=TRUE, padding=TRUE)
+profanity <- readLines("en_profanity.txt", skipNul=TRUE)
+enTok1 <- tokens_select(enTok1, profanity, selection="remove", padding=TRUE)  
+  
+# Create document-feature matrix for unigram
+enDfm1 <- dfm(enTok1)
+  
+# Create a wordcloud for the most frequent unigrams
+textplot_wordcloud(enDfm1, max_words = 200)  
+  
+# Create the unigram frequency dataframe
+freq1 <- textstat_frequency(enDfm1, groups=enCorpus$File, n=25)
+
+# Visualize the top 25 most frequent features from blogs, news and twitter. 
+b1 <- freq1 %>% 
+        filter(group=="blog") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+                geom_bar(stat="identity", fill="salmon")+
+                labs(title="Most Frequent Words in Blog", x="Words", y="Frequency")+
+                coord_flip()+
+                theme_classic()
+
+n1 <- freq1 %>% 
+        filter(group=="news") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgreen")+
+        labs(title="Most Frequent Words in News", x="Words", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+
+t1 <- freq1 %>% 
+        filter(group=="twi") %>% 
+        ggplot(aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="yellow")+
+        labs(title="Most Frequent Words in Twitter", x="Words", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+
+ggarrange(b1, n1, t1, nrow=1)  
+ 
+# Visualize top 25 most frequent bigrams 
+enTok2 <- tokens_ngrams(enTok1, n=2)
+enDfm2 <- dfm(enTok2)
+freq2 <- textstat_frequency(enDfm2, n=25)
+ggplot(data=freq2, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Most Frequent Bigrams", subtitle="Samples from blogs, news and twitter", x="N-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()  
+  
+# Visualize top 25 most frequent trigrams  
+enTok3 <- tokens_ngrams(enTok1, n=3)
+enDfm3 <- dfm(enTok3)
+freq3 <- textstat_frequency(enDfm3, n=25)
+ggplot(data=freq3, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Most Frequent Trigrams", subtitle="Samples from blogs, news and twitter", x="N-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()  
+  
+# Visualize top 25 most frequent quadrigrams  
+enTok4 <- tokens_ngrams(enTok1, n=4)
+enDfm4 <- dfm(enTok4)
+freq4 <- textstat_frequency(enDfm4, n=25)
+ggplot(data=freq4, aes(reorder(feature, frequency), frequency))+
+        geom_bar(stat="identity", fill="lightgrey")+
+        labs(title="Most Frequent Quadrigrams", subtitle="Samples from blogs, news and twitter", x="N-gram", y="Frequency")+
+        coord_flip()+
+        theme_classic()
+
+```
